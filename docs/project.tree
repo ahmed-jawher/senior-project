@@ -1,0 +1,52 @@
+logconsolidator/
+│
+├── README.md
+├── pyproject.toml                 # Dependencies & project metadata
+├── config/
+│   ├── sources.json               # User-defined: what files to watch (Can be multiple files) 
+│   └── schema/
+│       └── sources.schema.json    # JSON Schema for validation
+│
+├── src/
+│   └── logconsolidator/
+│       ├── __init__.py
+│       ├── main.py                # Entry point, orchestrates startup
+│       │
+│       ├── config/
+│       │   ├── __init__.py
+│       │   ├── loader.py          # Load & validate JSON configs
+│       │   ├── models.py          # Pydantic models for config schema
+│       │   └── defaults.py        # Default values, constants
+│       │
+│       ├── ingest/
+│       │   ├── __init__.py
+│       │   ├── watcher.py         # File watching logic (tail-like)
+│       │   ├── reader.py          # Line-by-line reading with position tracking
+│       │   └── state.py           # Persist read positions (survives restarts)
+│       │
+│       ├── process/
+│       │   ├── __init__.py
+│       │   ├── parser.py          # Regex / other parsing methods
+│       │   ├── normalizer.py      # Convert to LogEntry dataclass
+│       │   └── models.py          # LogEntry, Severity enum, etc.
+│       │
+│       ├── output/
+│       │   ├── __init__.py
+│       │   ├── base.py            # Abstract OutputAdapter interface
+│       │   ├── storage.py         # DuckDB adapter (for Grafana)
+│       │   └── vector.py          # ChromaDB adapter (for RAG)
+│       │
+│       ├── core/                  # SHARED UTILITIES
+│       │   ├── __init__.py
+│       │   ├── queues.py          # Queue wrappers, typed interfaces
+│       │   ├── logging.py         # Internal logging setup (meta!)
+│       │   └── exceptions.py      # Custom exception hierarchy
+│       │
+│       └── api/
+│           ├── __init__.py
+│           └── server.py          # FastAPI for health checks / adding sources during runtime
+│
+├── tests/
+│
+└── scripts/
+    └── install.sh                 # Setup script
