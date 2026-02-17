@@ -1,5 +1,5 @@
 {
-  "log_name": "ssh_auth",
+  "id": "ssh_auth",
   "path": "/Users/aj/Desktop/logs/secure.log",
   "parser": {
     "type": "regex",

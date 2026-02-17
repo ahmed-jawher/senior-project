@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Log Source",
+  "type": "object",
+  "required": ["id", "path", "parser"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "path": { "type": "string", "minLength": 1 },
+    "parser": {
+      "type": "object",
+      "required": ["type", "patterns"],
+      "properties": {
+        "type": { "const": "regex" },
+        "patterns": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    }
+  }
+}
