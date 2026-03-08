@@ -1,7 +1,11 @@
+from __future__ import annotations
+
+import logging
 import queue
 import signal
 import threading
 import time
+from types import FrameType
 
 from logconsolidator.config.defaults import (
     POLL_INTERVAL_SECONDS,
@@ -11,27 +15,20 @@ from logconsolidator.config.defaults import (
     RAW_QUEUE_MAXSIZE,
     STATE_PATH,
 )
-from logconsolidator.config.loader import load_sources
-from logconsolidator.core.exceptions import ConfigError
-from logconsolidator.core.logging import configure_logging
-from logconsolidator.core.queues import PipelineQueues
-from logconsolidator.ingest.state import PositionStateStore
-from logconsolidator.ingest.watcher import FileWatcher
-from logconsolidator.output.base import OutputAdapter
-from logconsolidator.output.storage import StorageAdapter
-from logconsolidator.output.vector import VectorAdapter
-from logconsolidator.process.models import LogEntry, RawLogLine
-from logconsolidator.process.normalizer import LogNormalizer
-from logconsolidator.process.parser import RegexParserRouter
+import logconsolidator.config as config
+import logconsolidator.core as core
+import logconsolidator.ingest as ingest
+import logconsolidator.output as output
+import logconsolidator.process as process
 
 
 class ProcessorWorker(threading.Thread):
     def __init__(
         self,
-        raw_queue: "queue.Queue[RawLogLine]",
-        processed_queue: "queue.Queue[LogEntry]",
-        parser: RegexParserRouter,
-        normalizer: LogNormalizer,
+        raw_queue: queue.Queue[process.RawLogLine],
+        processed_queue: queue.Queue[process.LogEntry],
+        parser: process.RegexParserRouter,
+        normalizer: process.LogNormalizer,
         stop_event: threading.Event,
     ) -> None:
         super().__init__(name="processor", daemon=True)
@@ -53,7 +50,7 @@ class ProcessorWorker(threading.Thread):
             self._put_with_backpressure(entry)
             self.raw_queue.task_done()
 
-    def _put_with_backpressure(self, entry: LogEntry) -> None:
+    def _put_with_backpressure(self, entry: process.LogEntry) -> None:
         while not self.stop_event.is_set():
             try:
                 self.processed_queue.put(entry, timeout=QUEUE_PUT_TIMEOUT_SECONDS)
@@ -65,21 +62,18 @@ class ProcessorWorker(threading.Thread):
 class DispatcherWorker(threading.Thread):
     def __init__(
         self,
-        processed_queue: "queue.Queue[LogEntry]",
-        adapters: list[OutputAdapter],
+        processed_queue: queue.Queue[process.LogEntry],
+        adapters: list[output.OutputAdapter],
         stop_event: threading.Event,
-        logger_name: str,
+        logger: logging.Logger,
     ) -> None:
         super().__init__(name="dispatcher", daemon=True)
         self.processed_queue = processed_queue
         self.adapters = adapters
         self.stop_event = stop_event
-        self.logger_name = logger_name
+        self.logger = logger
 
     def run(self) -> None:
-        import logging
-
-        logger = logging.getLogger(self.logger_name)
         while not self.stop_event.is_set():
             try:
                 entry = self.processed_queue.get(timeout=QUEUE_GET_TIMEOUT_SECONDS)
@@ -90,32 +84,32 @@ class DispatcherWorker(threading.Thread):
                 try:
                     adapter.handle(entry)
                 except Exception as exc:  # pragma: no cover
-                    logger.exception("adapter '%s' failed: %s", adapter.__class__.__name__, exc)
+                    self.logger.exception("adapter '%s' failed: %s", adapter.__class__.__name__, exc)
 
             self.processed_queue.task_done()
 
 
 class LogConsolidatorApp:
     def __init__(self) -> None:
-        self.logger = configure_logging()
+        self.logger = core.configure_logging()
         self.stop_event = threading.Event()
-        self.queues = PipelineQueues(
+        self.queues = core.PipelineQueues(
             raw_size=RAW_QUEUE_MAXSIZE,
             processed_size=PROCESSED_QUEUE_MAXSIZE,
         )
-        self.state_store = PositionStateStore(STATE_PATH)
-        self.watchers: list[FileWatcher] = []
+        self.state_store = ingest.PositionStateStore(STATE_PATH)
+        self.watchers: list[ingest.FileWatcher] = []
         self.processor: ProcessorWorker | None = None
         self.dispatcher: DispatcherWorker | None = None
-        self.adapters: list[OutputAdapter] = []
+        self.adapters: list[output.OutputAdapter] = []
 
     def start(self) -> None:
-        sources = load_sources()
-        parser = RegexParserRouter(sources)
-        normalizer = LogNormalizer()
+        sources = config.load_sources()
+        parser = process.RegexParserRouter(sources)
+        normalizer = process.LogNormalizer()
 
         self.watchers = [
-            FileWatcher(
+            ingest.FileWatcher(
                 source=source,
                 raw_queue=self.queues.raw_queue,
                 state_store=self.state_store,
@@ -133,12 +127,12 @@ class LogConsolidatorApp:
             stop_event=self.stop_event,
         )
 
-        self.adapters = [StorageAdapter(), VectorAdapter()]
+        self.adapters = [output.StorageAdapter(), output.VectorAdapter()]
         self.dispatcher = DispatcherWorker(
             processed_queue=self.queues.processed_queue,
             adapters=self.adapters,
             stop_event=self.stop_event,
-            logger_name=self.logger.name,
+            logger=self.logger,
         )
 
         for watcher in self.watchers:
@@ -169,15 +163,15 @@ class LogConsolidatorApp:
 def run() -> None:
     app = LogConsolidatorApp()
 
-    def _handle_signal(_signum: int, _frame: object) -> None:
-        app.stop()
+    def _handle_signal(_signum: int, _frame: FrameType | None) -> None:
+        app.stop_event.set()
 
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
 
     try:
         app.start()
-    except ConfigError as exc:
+    except core.ConfigError as exc:
         app.logger.error("configuration error: %s", exc)
         return
 
@@ -185,4 +179,10 @@ def run() -> None:
         while not app.stop_event.is_set():
             time.sleep(0.5)
     except KeyboardInterrupt:
+        app.stop_event.set()
+    finally:
         app.stop()
+
+
+if __name__ == "__main__":
+    run()
