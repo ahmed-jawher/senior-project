@@ -1,13 +1,10 @@
-"""Process stage: parse + normalize."""
+"""Process stage: parse."""
 
-from .models import LogEntry, RawLogLine, Severity
-from .normalizer import LogNormalizer
+from .models import LogEntry, RawLogLine
 from .parser import RegexParserRouter
 
 __all__ = [
     "LogEntry",
-    "LogNormalizer",
     "RawLogLine",
     "RegexParserRouter",
-    "Severity",
 ]

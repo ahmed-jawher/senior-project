@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import logging
 import queue
 import signal
@@ -28,14 +29,12 @@ class ProcessorWorker(threading.Thread):
         raw_queue: queue.Queue[process.RawLogLine],
         processed_queue: queue.Queue[process.LogEntry],
         parser: process.RegexParserRouter,
-        normalizer: process.LogNormalizer,
         stop_event: threading.Event,
     ) -> None:
         super().__init__(name="processor", daemon=True)
         self.raw_queue = raw_queue
         self.processed_queue = processed_queue
         self.parser = parser
-        self.normalizer = normalizer
         self.stop_event = stop_event
 
     def run(self) -> None:
@@ -46,7 +45,12 @@ class ProcessorWorker(threading.Thread):
                 continue
 
             fields = self.parser.parse(raw_line)
-            entry = self.normalizer.normalize(raw_line, fields)
+            entry = process.LogEntry(
+                source_id=raw_line.source_id,
+                observed_at=datetime.now(timezone.utc),
+                raw_message=raw_line.line,
+                fields=fields,
+            )
             self._put_with_backpressure(entry)
             self.raw_queue.task_done()
 
@@ -106,7 +110,6 @@ class LogConsolidatorApp:
     def start(self) -> None:
         sources = config.load_sources()
         parser = process.RegexParserRouter(sources)
-        normalizer = process.LogNormalizer()
 
         self.watchers = [
             ingest.FileWatcher(
@@ -123,7 +126,6 @@ class LogConsolidatorApp:
             raw_queue=self.queues.raw_queue,
             processed_queue=self.queues.processed_queue,
             parser=parser,
-            normalizer=normalizer,
             stop_event=self.stop_event,
         )
 

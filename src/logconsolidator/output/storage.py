@@ -17,7 +17,6 @@ class StorageAdapter(OutputAdapter):
         payload = {
             "source_id": entry.source_id,
             "observed_at": entry.observed_at.isoformat(),
-            "severity": entry.severity.value,
             "raw_message": entry.raw_message,
             **entry.fields,
         }
