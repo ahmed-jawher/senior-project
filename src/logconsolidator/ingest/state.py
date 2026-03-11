@@ -7,11 +7,15 @@ from typing import Dict, Optional
 
 @dataclass
 class SourcePosition:
+    """Last known inode/offset for a single log source."""
+
     inode: Optional[int]
     offset: int
 
 
 class PositionStateStore:
+    """Thread-safe state store so readers can resume after restart."""
+
     def __init__(self, state_path: Path) -> None:
         self.state_path = state_path
         self._lock = threading.Lock()
@@ -19,15 +23,18 @@ class PositionStateStore:
         self._load()
 
     def get(self, source_id: str) -> SourcePosition:
+        # -:- Unknown source starts with no inode and offset zero.
         with self._lock:
             return self._state.get(source_id, SourcePosition(inode=None, offset=0))
 
     def update(self, source_id: str, inode: Optional[int], offset: int) -> None:
+        # -:- Persist every update so crash/restart can continue from latest cursor.
         with self._lock:
             self._state[source_id] = SourcePosition(inode=inode, offset=offset)
             self._flush()
 
     def _load(self) -> None:
+        # -:- Best-effort load: corrupted or missing state file should not crash app.
         if not self.state_path.exists():
             return
         try:
@@ -50,6 +57,7 @@ class PositionStateStore:
             self._state[source_id] = SourcePosition(inode=inode, offset=offset)
 
     def _flush(self) -> None:
+        # -:- Atomic write via temp file avoids partial state on interruption.
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         serialized = {
             source_id: {"inode": pos.inode, "offset": pos.offset}

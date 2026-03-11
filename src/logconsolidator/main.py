@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Application orchestrator for the ingest -> process -> output pipeline."""
+
 from datetime import datetime, timezone
 import logging
 import queue
@@ -24,6 +26,8 @@ import logconsolidator.process as process
 
 
 class ProcessorWorker(threading.Thread):
+    """Consumes raw lines, parses them, then pushes normalized entries forward."""
+
     def __init__(
         self,
         raw_queue: queue.Queue[process.RawLogLine],
@@ -38,12 +42,14 @@ class ProcessorWorker(threading.Thread):
         self.stop_event = stop_event
 
     def run(self) -> None:
+        # -:- Keep pulling raw lines until shutdown is requested.
         while not self.stop_event.is_set():
             try:
                 raw_line = self.raw_queue.get(timeout=QUEUE_GET_TIMEOUT_SECONDS)
             except queue.Empty:
                 continue
 
+            # -:- Attach processing metadata and parser output to build a LogEntry.
             fields = self.parser.parse(raw_line)
             entry = process.LogEntry(
                 source_id=raw_line.source_id,
@@ -55,6 +61,7 @@ class ProcessorWorker(threading.Thread):
             self.raw_queue.task_done()
 
     def _put_with_backpressure(self, entry: process.LogEntry) -> None:
+        # -:- Retry while queue is full so bursts do not drop data.
         while not self.stop_event.is_set():
             try:
                 self.processed_queue.put(entry, timeout=QUEUE_PUT_TIMEOUT_SECONDS)
@@ -64,6 +71,8 @@ class ProcessorWorker(threading.Thread):
 
 
 class DispatcherWorker(threading.Thread):
+    """Fans out processed entries to all configured output adapters."""
+
     def __init__(
         self,
         processed_queue: queue.Queue[process.LogEntry],
@@ -78,6 +87,7 @@ class DispatcherWorker(threading.Thread):
         self.logger = logger
 
     def run(self) -> None:
+        # -:- Pull processed entries and dispatch each one to every sink.
         while not self.stop_event.is_set():
             try:
                 entry = self.processed_queue.get(timeout=QUEUE_GET_TIMEOUT_SECONDS)
@@ -87,6 +97,7 @@ class DispatcherWorker(threading.Thread):
             for adapter in self.adapters:
                 try:
                     adapter.handle(entry)
+                # -:- One adapter failure is isolated and should not stop the pipeline.
                 except Exception as exc:  # pragma: no cover
                     self.logger.exception("adapter '%s' failed: %s", adapter.__class__.__name__, exc)
 
@@ -94,6 +105,8 @@ class DispatcherWorker(threading.Thread):
 
 
 class LogConsolidatorApp:
+    """Builds and manages worker threads, queues, state, and output adapters."""
+
     def __init__(self) -> None:
         self.logger = core.configure_logging()
         self.stop_event = threading.Event()
@@ -108,9 +121,11 @@ class LogConsolidatorApp:
         self.adapters: list[output.OutputAdapter] = []
 
     def start(self) -> None:
+        # -:- 1) Load source definitions and compile parser routes once at startup.
         sources = config.load_sources()
         parser = process.RegexParserRouter(sources)
 
+        # -:- 2) Create one watcher per source; each watcher tails its own file.
         self.watchers = [
             ingest.FileWatcher(
                 source=source,
@@ -122,6 +137,7 @@ class LogConsolidatorApp:
             for source in sources
         ]
 
+        # -:- 3) Start the central processor that converts raw lines to LogEntry.
         self.processor = ProcessorWorker(
             raw_queue=self.queues.raw_queue,
             processed_queue=self.queues.processed_queue,
@@ -129,6 +145,7 @@ class LogConsolidatorApp:
             stop_event=self.stop_event,
         )
 
+        # -:- 4) Register output sinks and start dispatcher for fan-out delivery.
         self.adapters = [output.StorageAdapter(), output.VectorAdapter()]
         self.dispatcher = DispatcherWorker(
             processed_queue=self.queues.processed_queue,
@@ -145,6 +162,7 @@ class LogConsolidatorApp:
         self.logger.info("pipeline started: watchers=%d", len(self.watchers))
 
     def stop(self) -> None:
+        # -:- Signal all threads first, then join and close adapters cleanly.
         self.stop_event.set()
 
         for watcher in self.watchers:
@@ -163,9 +181,11 @@ class LogConsolidatorApp:
 
 
 def run() -> None:
+    """CLI entrypoint with signal handling and graceful shutdown."""
     app = LogConsolidatorApp()
 
     def _handle_signal(_signum: int, _frame: FrameType | None) -> None:
+        # -:- SIGINT/SIGTERM both trigger the same cooperative shutdown flag.
         app.stop_event.set()
 
     signal.signal(signal.SIGINT, _handle_signal)

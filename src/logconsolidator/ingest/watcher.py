@@ -10,6 +10,8 @@ from logconsolidator.process.models import RawLogLine
 
 
 class FileWatcher(threading.Thread):
+    """Polls one source file and pushes new lines into the raw queue."""
+
     def __init__(
         self,
         source: WatchSourceConfig,
@@ -27,6 +29,7 @@ class FileWatcher(threading.Thread):
         self.reader = LogReader(source.source_id, source.path, state_store)
 
     def run(self) -> None:
+        # -:- Watch loop: read new lines, enqueue, then sleep for poll interval.
         while not self.stop_event.is_set():
             for line in self.reader.read_available_lines():
                 payload = RawLogLine(source_id=self.source.source_id, line=line)
@@ -34,6 +37,7 @@ class FileWatcher(threading.Thread):
             time.sleep(self.poll_interval)
 
     def _put_with_backpressure(self, payload: RawLogLine) -> None:
+        # -:- Queue is bounded; retry until space exists or shutdown begins.
         while not self.stop_event.is_set():
             try:
                 self.raw_queue.put(payload, timeout=QUEUE_PUT_TIMEOUT_SECONDS)

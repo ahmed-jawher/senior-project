@@ -10,11 +10,14 @@ from logconsolidator.core.exceptions import ConfigError
 
 
 def load_sources(config_dir: Path = SOURCES_CONFIG_DIR) -> List[WatchSourceConfig]:
+    """Load all source JSON files, validate them, and return typed configs."""
+    # -:- Fail fast when the source directory itself is missing or misconfigured.
     if not config_dir.exists():
         raise ConfigError(f"Missing config directory: {config_dir}")
     if not config_dir.is_dir():
         raise ConfigError(f"Expected directory for sources config: {config_dir}")
 
+    # -:- Every JSON file under config/sources represents one watch source.
     config_paths = sorted(path for path in config_dir.glob("*.json") if path.is_file())
     if not config_paths:
         raise ConfigError("config/sources must contain at least one .json source file")
@@ -32,6 +35,7 @@ def load_sources(config_dir: Path = SOURCES_CONFIG_DIR) -> List[WatchSourceConfi
 
 
 def _load_json(path: Path) -> Dict[str, Any]:
+    """Read one JSON source file and ensure the top-level object shape."""
     try:
         with path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
@@ -47,6 +51,8 @@ def _load_json(path: Path) -> Dict[str, Any]:
 
 
 def _parse_source(raw: Dict[str, Any], config_path: Path) -> WatchSourceConfig:
+    """Validate one source record and convert it into WatchSourceConfig."""
+    # -:- Read required fields from the JSON payload.
     source_id = raw.get("id")
     path_raw = raw.get("path")
     parser_raw = raw.get("parser")
@@ -68,6 +74,7 @@ def _parse_source(raw: Dict[str, Any], config_path: Path) -> WatchSourceConfig:
     if not isinstance(patterns, dict) or not patterns:
         raise ConfigError(f"Source '{source_id}' requires non-empty parser.patterns")
 
+    # -:- Compile-check regex expressions during startup to catch bad config early.
     typed_patterns: Dict[str, str] = {}
     for field, expression in patterns.items():
         if not isinstance(field, str) or not isinstance(expression, str):
@@ -80,10 +87,12 @@ def _parse_source(raw: Dict[str, Any], config_path: Path) -> WatchSourceConfig:
             ) from exc
         typed_patterns[field] = expression
 
+    # -:- Resolve relative file paths from the config file location.
     path = Path(path_raw)
     if not path.is_absolute():
         path = (config_path.parent / path).resolve()
 
+    # -:- Verify the input log file exists and is readable before starting workers.
     if not path.exists():
         raise ConfigError(f"Source '{source_id}' path does not exist: {path}")
     if not path.is_file():
