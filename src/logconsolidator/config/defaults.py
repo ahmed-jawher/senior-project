@@ -7,6 +7,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SOURCES_CONFIG_DIR = PROJECT_ROOT / "config" / "sources"
 STATE_PATH = PROJECT_ROOT / "data" / "state" / "positions.json"
 PROCESSED_OUTPUT_PATH = PROJECT_ROOT / "data" / "processed.jsonl"
+CHROMA_PATH = PROJECT_ROOT / "data" / "chroma"
+CHROMA_COLLECTION = "logs"
 
 # -:- Queue capacities and worker polling/timeouts for pipeline threads.
 RAW_QUEUE_MAXSIZE = 1000
