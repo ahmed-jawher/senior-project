@@ -1,10 +1,13 @@
-from pathlib import Path
-import json
+from __future__ import annotations
+
+from datetime import datetime, timezone
 import queue
 import signal
 import sys
 import threading
 import time
+from pathlib import Path
+from types import FrameType
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 SRC_PATH = PROJECT_ROOT / "src"
@@ -19,43 +22,27 @@ from logconsolidator.config.defaults import (  # noqa: E402
     RAW_QUEUE_MAXSIZE,
     STATE_PATH,
 )
-from logconsolidator.config.loader import load_sources  # noqa: E402
-from logconsolidator.core.logging import configure_logging  # noqa: E402
-from logconsolidator.core.queues import PipelineQueues  # noqa: E402
-from logconsolidator.ingest.state import PositionStateStore  # noqa: E402
-from logconsolidator.ingest.watcher import FileWatcher  # noqa: E402
-from logconsolidator.output.base import OutputAdapter  # noqa: E402
-from logconsolidator.process.models import LogEntry, RawLogLine  # noqa: E402
-from logconsolidator.process.normalizer import LogNormalizer  # noqa: E402
-from logconsolidator.process.parser import RegexParserRouter  # noqa: E402
-
-
-class TerminalAdapter(OutputAdapter):
-    def handle(self, entry: LogEntry) -> None:
-        payload = {
-            "source_id": entry.source_id,
-            "observed_at": entry.observed_at.isoformat(),
-            "severity": entry.severity.value,
-            "raw_message": entry.raw_message,
-            **entry.fields,
-        }
-        print(json.dumps(payload))
+import logconsolidator.config as config  # noqa: E402
+import logconsolidator.core as core  # noqa: E402
+import logconsolidator.ingest as ingest  # noqa: E402
+import logconsolidator.output as output  # noqa: E402
+import logconsolidator.process as process  # noqa: E402
 
 
 class ProcessorWorker(threading.Thread):
+    """Consumes raw lines, parses them, then pushes normalized entries forward."""
+
     def __init__(
         self,
-        raw_queue: "queue.Queue[RawLogLine]",
-        processed_queue: "queue.Queue[LogEntry]",
-        parser: RegexParserRouter,
-        normalizer: LogNormalizer,
+        raw_queue: queue.Queue[process.RawLogLine],
+        processed_queue: queue.Queue[process.LogEntry],
+        parser: process.RegexParserRouter,
         stop_event: threading.Event,
     ) -> None:
         super().__init__(name="processor", daemon=True)
         self.raw_queue = raw_queue
         self.processed_queue = processed_queue
         self.parser = parser
-        self.normalizer = normalizer
         self.stop_event = stop_event
 
     def run(self) -> None:
@@ -66,11 +53,16 @@ class ProcessorWorker(threading.Thread):
                 continue
 
             fields = self.parser.parse(raw_line)
-            entry = self.normalizer.normalize(raw_line, fields)
+            entry = process.LogEntry(
+                source_id=raw_line.source_id,
+                observed_at=datetime.now(timezone.utc),
+                raw_message=raw_line.line,
+                fields=fields,
+            )
             self._put_with_backpressure(entry)
             self.raw_queue.task_done()
 
-    def _put_with_backpressure(self, entry: LogEntry) -> None:
+    def _put_with_backpressure(self, entry: process.LogEntry) -> None:
         while not self.stop_event.is_set():
             try:
                 self.processed_queue.put(entry, timeout=QUEUE_PUT_TIMEOUT_SECONDS)
@@ -80,15 +72,17 @@ class ProcessorWorker(threading.Thread):
 
 
 class DispatcherWorker(threading.Thread):
+    """Fans out processed entries to all configured output adapters."""
+
     def __init__(
         self,
-        processed_queue: "queue.Queue[LogEntry]",
-        adapter: OutputAdapter,
+        processed_queue: queue.Queue[process.LogEntry],
+        adapters: list[output.OutputAdapter],
         stop_event: threading.Event,
     ) -> None:
         super().__init__(name="dispatcher", daemon=True)
         self.processed_queue = processed_queue
-        self.adapter = adapter
+        self.adapters = adapters
         self.stop_event = stop_event
 
     def run(self) -> None:
@@ -98,30 +92,31 @@ class DispatcherWorker(threading.Thread):
             except queue.Empty:
                 continue
 
-            self.adapter.handle(entry)
+            for adapter in self.adapters:
+                adapter.handle(entry)
+
             self.processed_queue.task_done()
 
 
 def main() -> None:
-    logger = configure_logging()
+    logger = core.configure_logging()
     stop_event = threading.Event()
-    queues = PipelineQueues(
+    queues = core.PipelineQueues(
         raw_size=RAW_QUEUE_MAXSIZE,
         processed_size=PROCESSED_QUEUE_MAXSIZE,
     )
-    state_store = PositionStateStore(STATE_PATH)
+    state_store = ingest.PositionStateStore(STATE_PATH)
 
-    sources = load_sources()
+    sources = config.load_sources()
+    parser = process.RegexParserRouter(sources)
+
+    # Force a full replay by resetting every source cursor to the start of the file.
     for source in sources:
         inode = source.path.stat().st_ino if source.path.exists() else None
         state_store.update(source.source_id, inode=inode, offset=0)
 
-    parser = RegexParserRouter(sources)
-    normalizer = LogNormalizer()
-    terminal_adapter = TerminalAdapter()
-
     watchers = [
-        FileWatcher(
+        ingest.FileWatcher(
             source=source,
             raw_queue=queues.raw_queue,
             state_store=state_store,
@@ -135,16 +130,16 @@ def main() -> None:
         raw_queue=queues.raw_queue,
         processed_queue=queues.processed_queue,
         parser=parser,
-        normalizer=normalizer,
         stop_event=stop_event,
     )
+    adapters: list[output.OutputAdapter] = [output.StorageAdapter(), output.VectorAdapter()]
     dispatcher = DispatcherWorker(
         processed_queue=queues.processed_queue,
-        adapter=terminal_adapter,
+        adapters=adapters,
         stop_event=stop_event,
     )
 
-    def _handle_signal(_signum: int, _frame: object) -> None:
+    def _handle_signal(_signum: int, _frame: FrameType | None) -> None:
         stop_event.set()
 
     signal.signal(signal.SIGINT, _handle_signal)
@@ -156,14 +151,19 @@ def main() -> None:
     dispatcher.start()
     logger.info("terminal test started: watchers=%d", len(watchers))
 
-    while not stop_event.is_set():
-        time.sleep(0.5)
-
-    for watcher in watchers:
-        watcher.join(timeout=2)
-    processor.join(timeout=2)
-    dispatcher.join(timeout=2)
-    logger.info("terminal test stopped")
+    try:
+        while not stop_event.is_set():
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        stop_event.set()
+    finally:
+        for watcher in watchers:
+            watcher.join(timeout=2)
+        processor.join(timeout=2)
+        dispatcher.join(timeout=2)
+        for adapter in adapters:
+            adapter.close()
+        logger.info("terminal test stopped")
 
 
 if __name__ == "__main__":

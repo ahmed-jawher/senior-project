@@ -1,6 +1,6 @@
 {
   "id": "ssh_auth",
-  "path": "/Users/aj/Desktop/logs/secure.log",
+  "path": "/home/y04/Downloads/secure.log",
   "parser": {
     "type": "regex",
     "patterns": {

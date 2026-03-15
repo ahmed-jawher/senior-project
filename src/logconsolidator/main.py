@@ -4,11 +4,17 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
+from pathlib import Path
 import queue
 import signal
+import sys
 import threading
 import time
 from types import FrameType
+
+# Support direct execution via `python3 src/logconsolidator/main.py` in a src-layout project.
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from logconsolidator.config.defaults import (
     POLL_INTERVAL_SECONDS,
