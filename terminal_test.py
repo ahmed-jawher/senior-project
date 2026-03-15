@@ -55,7 +55,7 @@ class ProcessorWorker(threading.Thread):
             fields = self.parser.parse(raw_line)
             entry = process.LogEntry(
                 source_id=raw_line.source_id,
-                observed_at=datetime.now(timezone.utc),
+                timestamp=fields.get("timestamp", datetime.now(timezone.utc).isoformat()),
                 raw_message=raw_line.line,
                 fields=fields,
             )

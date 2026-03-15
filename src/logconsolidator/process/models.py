@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Dict
 
 
@@ -16,6 +15,6 @@ class LogEntry:
     """Normalized event shared with all output adapters."""
 
     source_id: str
-    observed_at: datetime
+    timestamp: str
     raw_message: str
     fields: Dict[str, str]

@@ -1,7 +1,6 @@
 import json
 import threading
 from pathlib import Path
-
 from logconsolidator.config.defaults import PROCESSED_OUTPUT_PATH
 from logconsolidator.output.base import OutputAdapter
 from logconsolidator.process.models import LogEntry
@@ -20,7 +19,7 @@ class StorageAdapter(OutputAdapter):
         # -:- Flatten structured fields into one JSON object per output line.
         payload = {
             "source_id": entry.source_id,
-            "observed_at": entry.observed_at.isoformat(),
+            "timestamp": entry.timestamp,
             "raw_message": entry.raw_message,
             **entry.fields,
         }

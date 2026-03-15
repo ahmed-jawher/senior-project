@@ -55,13 +55,13 @@ class VectorAdapter(OutputAdapter):
     def _build_metadata(self, entry: LogEntry) -> dict[str, str]:
         metadata = {
             "source_id": entry.source_id,
-            "observed_at": entry.observed_at.isoformat(),
+            "timestamp": entry.timestamp,
         }
         metadata.update({field: str(value) for field, value in sorted(entry.fields.items())})
         return metadata
 
     def _build_id(self, entry: LogEntry) -> str:
         raw = "|".join(
-            [entry.source_id, entry.observed_at.isoformat(), entry.raw_message]
+            [entry.source_id, entry.timestamp, entry.raw_message]
         ).encode("utf-8")
         return hashlib.sha256(raw).hexdigest()

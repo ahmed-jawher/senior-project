@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
 import unittest
@@ -46,7 +45,7 @@ class VectorAdapterTests(unittest.TestCase):
         self.chroma_path = Path(self.temp_dir.name) / "chroma"
         self.entry = LogEntry(
             source_id="auth",
-            observed_at=datetime(2026, 3, 14, 10, 20, tzinfo=timezone.utc),
+            timestamp="Mar 14 10:20:00",
             raw_message="Failed password for invalid user admin from 192.168.1.10 port 22 ssh2",
             fields={"user": "admin", "ip": "192.168.1.10"},
         )
@@ -82,21 +81,21 @@ class VectorAdapterTests(unittest.TestCase):
             payload["metadata"],
             {
                 "source_id": "auth",
-                "observed_at": "2026-03-14T10:20:00+00:00",
+                "timestamp": "Mar 14 10:20:00",
                 "ip": "192.168.1.10",
                 "user": "admin",
             },
         )
 
-    def test_document_excludes_observed_at(self) -> None:
+    def test_document_excludes_timestamp(self) -> None:
         adapter = VectorAdapter(chroma_path=self.chroma_path, client_factory=FakeClient)
 
         adapter.handle(self.entry)
 
         store = FakeClient._databases[(str(self.chroma_path), "logs")]
         document = next(iter(store.values()))["document"]
-        self.assertNotIn("observed_at", document)
-        self.assertNotIn("2026-03-14", document)
+        self.assertNotIn("timestamp", document)
+        self.assertNotIn("Mar 14 10:20:00", document)
 
     def test_upsert_keeps_duplicate_entry_singleton(self) -> None:
         adapter = VectorAdapter(chroma_path=self.chroma_path, client_factory=FakeClient)
