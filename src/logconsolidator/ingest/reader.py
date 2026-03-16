@@ -46,7 +46,10 @@ class LogReader:
             with self.path.open("r", encoding="utf-8", errors="replace") as handle:
                 handle.seek(self._offset)
                 for line in handle:
-                    lines.append(line.rstrip("\n"))
+                    cleaned = line.strip()
+                    if not cleaned:
+                        continue
+                    lines.append(cleaned)
                 self._offset = handle.tell()
         except OSError:
             return []
