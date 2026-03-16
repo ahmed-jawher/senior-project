@@ -6,7 +6,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 # -:- Default input/output paths used across the application.
 SOURCES_CONFIG_DIR = PROJECT_ROOT / "config" / "sources"
 STATE_PATH = PROJECT_ROOT / "data" / "state" / "positions.json"
-PROCESSED_OUTPUT_PATH = PROJECT_ROOT / "data" / "processed.jsonl"
+PROCESSED_OUTPUT_PATH = PROJECT_ROOT / "data" / "logs.duckdb"
 CHROMA_PATH = PROJECT_ROOT / "data" / "chroma"
 CHROMA_COLLECTION = "logs"
 
