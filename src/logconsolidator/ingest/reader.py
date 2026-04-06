@@ -25,15 +25,12 @@ class LogReader:
         except OSError:
             return []
 
-        # -:- On first loop, trust saved cursor only if inode/size still match.
+        # -:- On first loop, always start from the beginning of the file.
         if not self._initialized:
-            # -:- First boot starts at EOF when no trusted persisted position exists.
-            if self._inode != stat.st_ino or self._offset > stat.st_size:
-                self._offset = stat.st_size
             self._inode = stat.st_ino
+            self._offset = 0
             self._initialized = True
             self.state_store.update(self.source_id, self._inode, self._offset)
-            return []
 
         # -:- Detect rotation/truncation and restart reading from beginning.
         if self._inode != stat.st_ino or stat.st_size < self._offset:

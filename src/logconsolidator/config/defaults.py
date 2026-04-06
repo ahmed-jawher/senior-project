@@ -6,13 +6,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 # -:- Default input/output paths used across the application.
 SOURCES_CONFIG_DIR = PROJECT_ROOT / "config" / "sources"
 STATE_PATH = PROJECT_ROOT / "data" / "state" / "positions.json"
-PROCESSED_OUTPUT_PATH = PROJECT_ROOT / "data" / "logs.duckdb"
+PROCESSED_OUTPUT_PATH = PROJECT_ROOT / "data" / "logconsolidator.duckdb"
 CHROMA_PATH = PROJECT_ROOT / "data" / "chroma"
 CHROMA_COLLECTION = "logs"
 
 # -:- Queue capacities and worker polling/timeouts for pipeline threads.
 RAW_QUEUE_MAXSIZE = 1000
 PROCESSED_QUEUE_MAXSIZE = 1000
+VECTOR_QUEUE_MAXSIZE = 10000
 POLL_INTERVAL_SECONDS = 0.5
 QUEUE_PUT_TIMEOUT_SECONDS = 0.5
 QUEUE_GET_TIMEOUT_SECONDS = 0.5

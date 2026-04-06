@@ -32,30 +32,30 @@ import logconsolidator.process as process
 
 
 class ProcessorWorker(threading.Thread):
-    """Consumes raw lines, parses them, then pushes normalized entries forward."""
+    """Consumes raw lines, parses them, then pushes to both DuckDB and vector queues."""
 
     def __init__(
         self,
         raw_queue: queue.Queue[process.RawLogLine],
         processed_queue: queue.Queue[process.LogEntry],
+        vector_queue: queue.Queue[process.LogEntry],
         parser: process.RegexParserRouter,
         stop_event: threading.Event,
     ) -> None:
         super().__init__(name="processor", daemon=True)
         self.raw_queue = raw_queue
         self.processed_queue = processed_queue
+        self.vector_queue = vector_queue
         self.parser = parser
         self.stop_event = stop_event
 
     def run(self) -> None:
-        # -:- Keep pulling raw lines until shutdown is requested.
         while not self.stop_event.is_set():
             try:
                 raw_line = self.raw_queue.get(timeout=QUEUE_GET_TIMEOUT_SECONDS)
             except queue.Empty:
                 continue
 
-            # -:- Attach processing metadata and parser output to build a LogEntry.
             fields = self.parser.parse(raw_line)
             entry = process.LogEntry(
                 source_id=raw_line.source_id,
@@ -63,21 +63,22 @@ class ProcessorWorker(threading.Thread):
                 raw_message=raw_line.line,
                 fields=fields,
             )
-            self._put_with_backpressure(entry)
+            # -:- Fan out to both queues. Each has its own worker draining at its own pace.
+            self._put_with_backpressure(self.processed_queue, entry)
+            self._put_with_backpressure(self.vector_queue, entry)
             self.raw_queue.task_done()
 
-    def _put_with_backpressure(self, entry: process.LogEntry) -> None:
-        # -:- Retry while queue is full so bursts do not drop data.
+    def _put_with_backpressure(self, q: queue.Queue, entry: process.LogEntry) -> None:
         while not self.stop_event.is_set():
             try:
-                self.processed_queue.put(entry, timeout=QUEUE_PUT_TIMEOUT_SECONDS)
+                q.put(entry, timeout=QUEUE_PUT_TIMEOUT_SECONDS)
                 return
             except queue.Full:
                 continue
 
 
 class DispatcherWorker(threading.Thread):
-    """Fans out processed entries to all configured output adapters."""
+    """Drains the processed queue and writes to DuckDB via StorageAdapter."""
 
     def __init__(
         self,
@@ -93,7 +94,6 @@ class DispatcherWorker(threading.Thread):
         self.logger = logger
 
     def run(self) -> None:
-        # -:- Pull processed entries and dispatch each one to every sink.
         while not self.stop_event.is_set():
             try:
                 entry = self.processed_queue.get(timeout=QUEUE_GET_TIMEOUT_SECONDS)
@@ -103,11 +103,41 @@ class DispatcherWorker(threading.Thread):
             for adapter in self.adapters:
                 try:
                     adapter.handle(entry)
-                # -:- One adapter failure is isolated and should not stop the pipeline.
                 except Exception as exc:  # pragma: no cover
                     self.logger.exception("adapter '%s' failed: %s", adapter.__class__.__name__, exc)
 
             self.processed_queue.task_done()
+
+
+class VectorWorker(threading.Thread):
+    """Dedicated thread for ChromaDB writes, drains the vector queue independently."""
+
+    def __init__(
+        self,
+        vector_queue: queue.Queue[process.LogEntry],
+        adapter: output.VectorAdapter,
+        stop_event: threading.Event,
+        logger: logging.Logger,
+    ) -> None:
+        super().__init__(name="vector-worker", daemon=True)
+        self.vector_queue = vector_queue
+        self.adapter = adapter
+        self.stop_event = stop_event
+        self.logger = logger
+
+    def run(self) -> None:
+        while not self.stop_event.is_set():
+            try:
+                entry = self.vector_queue.get(timeout=QUEUE_GET_TIMEOUT_SECONDS)
+            except queue.Empty:
+                continue
+
+            try:
+                self.adapter.handle(entry)
+            except Exception as exc:  # pragma: no cover
+                self.logger.exception("VectorAdapter failed: %s", exc)
+
+            self.vector_queue.task_done()
 
 
 class LogConsolidatorApp:
@@ -124,6 +154,7 @@ class LogConsolidatorApp:
         self.watchers: list[ingest.FileWatcher] = []
         self.processor: ProcessorWorker | None = None
         self.dispatcher: DispatcherWorker | None = None
+        self.vector_worker: VectorWorker | None = None
         self.adapters: list[output.OutputAdapter] = []
 
     def start(self) -> None:
@@ -143,19 +174,31 @@ class LogConsolidatorApp:
             for source in sources
         ]
 
-        # -:- 3) Start the central processor that converts raw lines to LogEntry.
+        # -:- 3) Processor fans out parsed entries to both queues.
         self.processor = ProcessorWorker(
             raw_queue=self.queues.raw_queue,
             processed_queue=self.queues.processed_queue,
+            vector_queue=self.queues.vector_queue,
             parser=parser,
             stop_event=self.stop_event,
         )
 
-        # -:- 4) Register output sinks and start dispatcher for fan-out delivery.
-        self.adapters = [output.StorageAdapter(), output.VectorAdapter()]
+        # -:- 4) DuckDB dispatcher — fast, drains processed_queue independently.
+        storage_adapter = output.StorageAdapter(sources=sources)
+        self.adapters = [storage_adapter]
         self.dispatcher = DispatcherWorker(
             processed_queue=self.queues.processed_queue,
             adapters=self.adapters,
+            stop_event=self.stop_event,
+            logger=self.logger,
+        )
+
+        # -:- 5) ChromaDB worker — slow, drains vector_queue independently.
+        vector_adapter = output.VectorAdapter()
+        self.adapters.append(vector_adapter)
+        self.vector_worker = VectorWorker(
+            vector_queue=self.queues.vector_queue,
+            adapter=vector_adapter,
             stop_event=self.stop_event,
             logger=self.logger,
         )
@@ -164,11 +207,11 @@ class LogConsolidatorApp:
             watcher.start()
         self.processor.start()
         self.dispatcher.start()
+        self.vector_worker.start()
 
         self.logger.info("pipeline started: watchers=%d", len(self.watchers))
 
     def stop(self) -> None:
-        # -:- Signal all threads first, then join and close adapters cleanly.
         self.stop_event.set()
 
         for watcher in self.watchers:
@@ -179,6 +222,9 @@ class LogConsolidatorApp:
 
         if self.dispatcher is not None:
             self.dispatcher.join(timeout=2)
+
+        if self.vector_worker is not None:
+            self.vector_worker.join(timeout=5)
 
         for adapter in self.adapters:
             adapter.close()
@@ -191,7 +237,6 @@ def run() -> None:
     app = LogConsolidatorApp()
 
     def _handle_signal(_signum: int, _frame: FrameType | None) -> None:
-        # -:- SIGINT/SIGTERM both trigger the same cooperative shutdown flag.
         app.stop_event.set()
 
     signal.signal(signal.SIGINT, _handle_signal)
