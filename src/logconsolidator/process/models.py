@@ -16,6 +16,6 @@ class LogEntry:
     """Normalized event shared with all output adapters."""
 
     source_id: str
-    timestamp: str
+    observed_at: datetime
     raw_message: str
     fields: Dict[str, str]
