@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 import re
-from typing import Dict, Pattern
 
 from logconsolidator.config.models import WatchSourceConfig
 from logconsolidator.process.models import RawLogLine
@@ -10,14 +11,14 @@ class RegexParserRouter:
 
     def __init__(self, sources: list[WatchSourceConfig]) -> None:
         # -:- Compile once at startup instead of compiling on each log line.
-        self._compiled: Dict[str, Dict[str, Pattern[str]]] = {}
+        self._compiled: dict[str, dict[str, re.Pattern[str]]] = {}
         for source in sources:
             self._compiled[source.source_id] = {
                 field: re.compile(expr)
                 for field, expr in source.parser.patterns.items()
             }
 
-    def parse(self, raw_line: RawLogLine) -> Dict[str, str]:
+    def parse(self, raw_line: RawLogLine) -> dict[str, str]:
         # -:- Route the line to the parser config that belongs to its source id.
         patterns = self._compiled.get(raw_line.source_id)
         if patterns is None:

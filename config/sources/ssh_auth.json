@@ -4,7 +4,6 @@
   "parser": {
     "type": "regex",
     "patterns": {
-      "timestamp": "(\\w+\\s+\\d+\\s+\\d+:\\d+:\\d+)",
       "ip": "(\\d+\\.\\d+\\.\\d+\\.\\d+)",
       "user": "USER=([^\\s]+)",
       "status": "(Failed|Accepted)"
