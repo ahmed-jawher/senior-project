@@ -1,6 +1,6 @@
 {
   "id": "ssh_auth",
-  "path": "D:\\logexample\\secure.log",
+  "path": "/Users/aj/Desktop/logs/secure.log",
   "parser": {
     "type": "regex",
     "patterns": {
