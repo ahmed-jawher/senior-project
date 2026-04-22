@@ -1,0 +1,73 @@
+{
+  "id": "apache_ood",
+  "path": "D:\\logexample\\hayrat.uob.edu.bh_error_ssl.log",
+  "parser": {
+    "type": "regex",
+    "patterns": {
+      "timestamp": "log_time=\"([^\"]+)\"",
+      "ip": "req_user_ip=\"([^\"]+)\"",
+      "user": "remote_user=\"([^\"]+)\"",
+      "status": "req_status=\"(\\d+)\"",
+      "method": "req_method=\"([^\"]+)\"",
+      "uri": "req_uri=\"([^\"]+)\"",
+      "pid": "\\[pid (\\d+)"
+    }
+  },
+  "classify": [
+    {
+      "match": "connection refused",
+      "service": "apache",
+      "event_type": "backend_connection_refused",
+      "severity": "high",
+      "is_security_relevant": false,
+      "extract": {
+        "backend": "attempt to connect to ([^\\s]+)"
+      }
+    },
+    {
+      "match": "proxy:error",
+      "service": "apache",
+      "event_type": "backend_error",
+      "severity": "high",
+      "is_security_relevant": false,
+      "extract": {
+        "backend": "backend: ([^,]+)"
+      }
+    },
+    {
+      "match": "req_status=\"503\"",
+      "service": "apache_ood",
+      "event_type": "service_unavailable",
+      "severity": "medium",
+      "is_security_relevant": false
+    },
+    {
+      "match": "req_status=\"401\"",
+      "service": "apache_ood",
+      "event_type": "unauthorized_request",
+      "severity": "medium",
+      "is_security_relevant": true
+    },
+    {
+      "match": "req_status=\"403\"",
+      "service": "apache_ood",
+      "event_type": "forbidden_request",
+      "severity": "medium",
+      "is_security_relevant": true
+    },
+    {
+      "match": "req_status=\"200\"",
+      "service": "apache_ood",
+      "event_type": "successful_request",
+      "severity": "low",
+      "is_security_relevant": false
+    },
+    {
+      "match": "lua:info",
+      "service": "apache_ood",
+      "event_type": "access_log",
+      "severity": "low",
+      "is_security_relevant": false
+    }
+  ]
+}
