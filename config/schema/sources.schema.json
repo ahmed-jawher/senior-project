@@ -17,6 +17,24 @@
           "additionalProperties": { "type": "string" }
         }
       }
+    },
+    "classify": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["match", "event_type", "severity", "is_security_relevant"],
+        "properties": {
+          "match":                 { "type": "string", "minLength": 1 },
+          "service":               { "type": "string" },
+          "event_type":            { "type": "string", "minLength": 1 },
+          "severity":              { "type": "string", "enum": ["low", "medium", "high"] },
+          "is_security_relevant":  { "type": "boolean" },
+          "extract": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          }
+        }
+      }
     }
   }
 }

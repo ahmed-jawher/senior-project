@@ -1,13 +1,133 @@
 {
   "id": "ssh_auth",
-  "path": "/Users/aj/Desktop/logs/secure.log",
+  "path": "D:\\logexample\\secure.log",
   "parser": {
     "type": "regex",
     "patterns": {
       "timestamp": "(\\w+\\s+\\d+\\s+\\d+:\\d+:\\d+)",
-      "ip": "(\\d+\\.\\d+\\.\\d+\\.\\d+)",
-      "user": "USER=([^\\s]+)",
-      "status": "(Failed|Accepted)"
+      "session_id": "\\[(\\d+)\\]",
+      "port": "port\\s+(\\d+)"
     }
-  }
+  },
+  "classify": [
+    {
+      "match": "illegal user",
+      "service": "sshd",
+      "event_type": "invalid_user_attempt",
+      "severity": "medium",
+      "is_security_relevant": true,
+      "extract": {
+        "user": "illegal user\\s+(\\S+)",
+        "ip": "from ([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)"
+      }
+    },
+    {
+      "match": "invalid user",
+      "service": "sshd",
+      "event_type": "invalid_user_attempt",
+      "severity": "medium",
+      "is_security_relevant": true,
+      "extract": {
+        "user": "invalid user\\s+(\\S+)",
+        "ip": "from ([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)"
+      }
+    },
+    {
+      "match": "failed password",
+      "service": "sshd",
+      "event_type": "failed_login",
+      "severity": "medium",
+      "is_security_relevant": true,
+      "extract": {
+        "user": "failed password for (?:invalid user )?([^\\s]+)",
+        "ip": "from ([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)",
+        "status": "(Failed)"
+      }
+    },
+    {
+      "match": "accepted password",
+      "service": "sshd",
+      "event_type": "successful_login",
+      "severity": "low",
+      "is_security_relevant": true,
+      "extract": {
+        "user": "accepted password for ([^\\s]+)",
+        "ip": "from ([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)",
+        "status": "(Accepted)"
+      }
+    },
+    {
+      "match": "pam_unix(sshd:auth): authentication failure",
+      "service": "sshd",
+      "event_type": "auth_failure",
+      "severity": "medium",
+      "is_security_relevant": true,
+      "extract": {
+        "user": "user=([^\\s]+)",
+        "ip": "rhost=([^\\s]+)"
+      }
+    },
+    {
+      "match": "password check failed",
+      "service": "unix_chkpwd",
+      "event_type": "auth_failure",
+      "severity": "medium",
+      "is_security_relevant": true,
+      "extract": {
+        "user": "user \\(([^)]+)\\)"
+      }
+    },
+    {
+      "match": "received disconnect",
+      "service": "sshd",
+      "event_type": "disconnect",
+      "severity": "low",
+      "is_security_relevant": true,
+      "extract": {
+        "ip": "from ([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)"
+      }
+    },
+    {
+      "match": "disconnected from",
+      "service": "sshd",
+      "event_type": "disconnect",
+      "severity": "low",
+      "is_security_relevant": true,
+      "extract": {
+        "ip": "([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)"
+      }
+    },
+    {
+      "match": "connection closed",
+      "service": "sshd",
+      "event_type": "connection_closed",
+      "severity": "low",
+      "is_security_relevant": true
+    },
+    {
+      "match": "more authentication failures",
+      "service": "sshd",
+      "event_type": "auth_failure_summary",
+      "severity": "medium",
+      "is_security_relevant": true
+    },
+    {
+      "match": "command=",
+      "service": "sudo",
+      "event_type": "investigation_command",
+      "severity": "medium",
+      "is_security_relevant": true,
+      "extract": {
+        "command": "command=(.+)$",
+        "user": ":\\s+([^\\s]+)\\s+:\\s+pwd="
+      }
+    },
+    {
+      "match": "unknown option",
+      "service": "pam_ldap",
+      "event_type": "service_config_error",
+      "severity": "high",
+      "is_security_relevant": true
+    }
+  ]
 }
