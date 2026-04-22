@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from logconsolidator.config.defaults import SOURCES_CONFIG_DIR
-from logconsolidator.config.models import ParserConfig, WatchSourceConfig
+from logconsolidator.config.models import ClassifyRule, ParserConfig, WatchSourceConfig
 from logconsolidator.core.exceptions import ConfigError
 
 
@@ -100,8 +100,62 @@ def _parse_source(raw: Dict[str, Any], config_path: Path) -> WatchSourceConfig:
     if not os.access(path, os.R_OK):
         raise ConfigError(f"Source '{source_id}' path is not readable: {path}")
 
+    classify_rules = _parse_classify_rules(raw, source_id)
+
     return WatchSourceConfig(
         source_id=source_id,
         path=path,
         parser=ParserConfig(parser_type="regex", patterns=typed_patterns),
+        classify_rules=classify_rules,
     )
+
+
+def _parse_classify_rules(raw: Dict[str, Any], source_id: str) -> List[ClassifyRule]:
+    classify_raw = raw.get("classify", [])
+    if not isinstance(classify_raw, list):
+        raise ConfigError(f"Source '{source_id}' classify must be an array")
+
+    rules: List[ClassifyRule] = []
+    for i, rule in enumerate(classify_raw):
+        if not isinstance(rule, dict):
+            raise ConfigError(f"Source '{source_id}' classify[{i}] must be an object")
+
+        match = rule.get("match")
+        if not isinstance(match, str) or not match:
+            raise ConfigError(f"Source '{source_id}' classify[{i}] requires non-empty string 'match'")
+
+        event_type = rule.get("event_type")
+        if not isinstance(event_type, str) or not event_type:
+            raise ConfigError(f"Source '{source_id}' classify[{i}] requires non-empty string 'event_type'")
+
+        severity = rule.get("severity", "low")
+        if severity not in ("low", "medium", "high"):
+            raise ConfigError(f"Source '{source_id}' classify[{i}] severity must be low/medium/high")
+
+        is_security_relevant = rule.get("is_security_relevant", False)
+        if not isinstance(is_security_relevant, bool):
+            raise ConfigError(f"Source '{source_id}' classify[{i}] is_security_relevant must be boolean")
+
+        service = rule.get("service", "unknown")
+
+        extract = rule.get("extract", {})
+        if not isinstance(extract, dict):
+            raise ConfigError(f"Source '{source_id}' classify[{i}] extract must be an object")
+        for field_name, expr in extract.items():
+            try:
+                re.compile(expr)
+            except re.error as exc:
+                raise ConfigError(
+                    f"Source '{source_id}' classify[{i}] extract.{field_name} invalid regex: {exc}"
+                ) from exc
+
+        rules.append(ClassifyRule(
+            match=match,
+            event_type=event_type,
+            severity=severity,
+            is_security_relevant=is_security_relevant,
+            service=service,
+            extract=extract,
+        ))
+
+    return rules
