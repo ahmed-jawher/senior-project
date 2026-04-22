@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 
 import psycopg
 
@@ -12,11 +13,11 @@ logger = logging.getLogger(__name__)
 class StorageAdapter(OutputAdapter):
     def __init__(self) -> None:
         self.conn = psycopg.connect(
-            host="localhost",
-            port=5432,
-            dbname="logconsolidator",
-            user="postgres",
-            password="hero",
+            host=os.environ.get("PGHOST", "localhost"),
+            port=int(os.environ.get("PGPORT", "5432")),
+            dbname=os.environ.get("PGDATABASE", "logconsolidator"),
+            user=os.environ.get("PGUSER", "postgres"),
+            password=os.environ.get("PGPASSWORD", ""),
         )
         self.conn.autocommit = True
 
