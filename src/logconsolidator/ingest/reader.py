@@ -13,6 +13,7 @@ class LogReader:
         saved = state_store.get(source_id)
         self._inode = saved.inode
         self._offset = saved.offset
+        self._has_saved_state = saved.inode is not None
         self._initialized = False
 
     def read_available_lines(self) -> list[str]:
@@ -25,15 +26,16 @@ class LogReader:
         except OSError:
             return []
 
-        # -:- On first loop, trust saved cursor only if inode/size still match.
+        # -:- On first loop, decide where to start reading from.
         if not self._initialized:
-            # -:- First boot starts at EOF when no trusted persisted position exists.
-            if self._inode != stat.st_ino or self._offset > stat.st_size:
-                self._offset = stat.st_size
+            if not self._has_saved_state:
+                # -:- New source: ingest the existing file from the beginning.
+                self._offset = 0
+            elif self._inode != stat.st_ino or self._offset > stat.st_size:
+                # -:- Rotation/truncation since last run: start from beginning.
+                self._offset = 0
             self._inode = stat.st_ino
             self._initialized = True
-            self.state_store.update(self.source_id, self._inode, self._offset)
-            return []
 
         # -:- Detect rotation/truncation and restart reading from beginning.
         if self._inode != stat.st_ino or stat.st_size < self._offset:
