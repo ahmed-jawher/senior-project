@@ -11,24 +11,37 @@ logger = logging.getLogger(__name__)
 
 
 class StorageAdapter(OutputAdapter):
+    """Persists processed log entries to PostgreSQL with one-shot reconnect on transient failures."""
+
     def __init__(self) -> None:
-        self.conn = psycopg.connect(
-            host=os.environ.get("PGHOST", "localhost"),
-            port=int(os.environ.get("PGPORT", "5432")),
-            dbname=os.environ.get("PGDATABASE", "logconsolidator"),
-            user=os.environ.get("PGUSER", "postgres"),
-            password=os.environ.get("PGPASSWORD", ""),
-        )
+        self._conn_kwargs = {
+            "host": os.environ.get("PGHOST", "localhost"),
+            "port": int(os.environ.get("PGPORT", "5432")),
+            "dbname": os.environ.get("PGDATABASE", "logconsolidator"),
+            "user": os.environ.get("PGUSER", "postgres"),
+            "password": os.environ.get("PGPASSWORD", ""),
+        }
+        self.conn: psycopg.Connection | None = None
+        self._connect()
+
+    def _connect(self) -> None:
+        self.conn = psycopg.connect(**self._conn_kwargs)
         self.conn.autocommit = True
 
     def handle(self, entry: LogEntry) -> None:
-        payload = {
-            "source_id": entry.source_id,
-            "observed_at": entry.observed_at.isoformat(),
-            "raw_message": entry.raw_message,
-            **entry.fields,
-        }
+        try:
+            self._insert(entry)
+        except psycopg.OperationalError as exc:
+            # Connection died (DB restart, network blip). Try once to reconnect; if
+            # that also fails, propagate so the dispatcher logs and drops the line
+            # rather than killing the worker.
+            logger.warning("postgres insert failed (%s); reconnecting", exc)
+            self._safe_close()
+            self._connect()
+            self._insert(entry)
 
+    def _insert(self, entry: LogEntry) -> None:
+        assert self.conn is not None
         with self.conn.cursor() as cur:
             cur.execute(
                 """
@@ -39,11 +52,19 @@ class StorageAdapter(OutputAdapter):
                     entry.source_id,
                     entry.observed_at,
                     entry.raw_message,
-                    json.dumps(payload, ensure_ascii=False),
+                    json.dumps(entry.fields, ensure_ascii=False),
                 ),
             )
+        logger.debug("stored log: source=%s", entry.source_id)
 
-        logger.info("Stored log in PostgreSQL: %s", entry.raw_message)
+    def _safe_close(self) -> None:
+        if self.conn is None:
+            return
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+        self.conn = None
 
     def close(self) -> None:
-        self.conn.close()
+        self._safe_close()

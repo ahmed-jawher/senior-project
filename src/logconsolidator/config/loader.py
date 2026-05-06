@@ -1,15 +1,19 @@
+from __future__ import annotations
+
 import json
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from logconsolidator.config.defaults import SOURCES_CONFIG_DIR
 from logconsolidator.config.models import ClassifyRule, ParserConfig, WatchSourceConfig
 from logconsolidator.core.exceptions import ConfigError
 
+_VALID_SEVERITIES = ("low", "medium", "high")
 
-def load_sources(config_dir: Path = SOURCES_CONFIG_DIR) -> List[WatchSourceConfig]:
+
+def load_sources(config_dir: Path = SOURCES_CONFIG_DIR) -> list[WatchSourceConfig]:
     """Load all source JSON files, validate them, and return typed configs."""
     # -:- Fail fast when the source directory itself is missing or misconfigured.
     if not config_dir.exists():
@@ -22,7 +26,7 @@ def load_sources(config_dir: Path = SOURCES_CONFIG_DIR) -> List[WatchSourceConfi
     if not config_paths:
         raise ConfigError("config/sources must contain at least one .json source file")
 
-    parsed_sources: List[WatchSourceConfig] = []
+    parsed_sources: list[WatchSourceConfig] = []
     for config_path in config_paths:
         payload = _load_json(config_path)
         parsed_sources.append(_parse_source(payload, config_path))
@@ -34,7 +38,7 @@ def load_sources(config_dir: Path = SOURCES_CONFIG_DIR) -> List[WatchSourceConfi
     return parsed_sources
 
 
-def _load_json(path: Path) -> Dict[str, Any]:
+def _load_json(path: Path) -> dict[str, Any]:
     """Read one JSON source file and ensure the top-level object shape."""
     try:
         with path.open("r", encoding="utf-8") as handle:
@@ -50,7 +54,7 @@ def _load_json(path: Path) -> Dict[str, Any]:
     return data
 
 
-def _parse_source(raw: Dict[str, Any], config_path: Path) -> WatchSourceConfig:
+def _parse_source(raw: dict[str, Any], config_path: Path) -> WatchSourceConfig:
     """Validate one source record and convert it into WatchSourceConfig."""
     # -:- Read required fields from the JSON payload.
     source_id = raw.get("id")
@@ -75,7 +79,7 @@ def _parse_source(raw: Dict[str, Any], config_path: Path) -> WatchSourceConfig:
         raise ConfigError(f"Source '{source_id}' requires non-empty parser.patterns")
 
     # -:- Compile-check regex expressions during startup to catch bad config early.
-    typed_patterns: Dict[str, str] = {}
+    typed_patterns: dict[str, str] = {}
     for field, expression in patterns.items():
         if not isinstance(field, str) or not isinstance(expression, str):
             raise ConfigError(f"Source '{source_id}' has non-string parser pattern")
@@ -110,12 +114,12 @@ def _parse_source(raw: Dict[str, Any], config_path: Path) -> WatchSourceConfig:
     )
 
 
-def _parse_classify_rules(raw: Dict[str, Any], source_id: str) -> List[ClassifyRule]:
+def _parse_classify_rules(raw: dict[str, Any], source_id: str) -> list[ClassifyRule]:
     classify_raw = raw.get("classify", [])
     if not isinstance(classify_raw, list):
         raise ConfigError(f"Source '{source_id}' classify must be an array")
 
-    rules: List[ClassifyRule] = []
+    rules: list[ClassifyRule] = []
     for i, rule in enumerate(classify_raw):
         if not isinstance(rule, dict):
             raise ConfigError(f"Source '{source_id}' classify[{i}] must be an object")
@@ -129,19 +133,27 @@ def _parse_classify_rules(raw: Dict[str, Any], source_id: str) -> List[ClassifyR
             raise ConfigError(f"Source '{source_id}' classify[{i}] requires non-empty string 'event_type'")
 
         severity = rule.get("severity", "low")
-        if severity not in ("low", "medium", "high"):
-            raise ConfigError(f"Source '{source_id}' classify[{i}] severity must be low/medium/high")
+        if severity not in _VALID_SEVERITIES:
+            raise ConfigError(
+                f"Source '{source_id}' classify[{i}] severity must be one of {_VALID_SEVERITIES}"
+            )
 
         is_security_relevant = rule.get("is_security_relevant", False)
         if not isinstance(is_security_relevant, bool):
             raise ConfigError(f"Source '{source_id}' classify[{i}] is_security_relevant must be boolean")
 
         service = rule.get("service", "unknown")
+        if not isinstance(service, str) or not service:
+            raise ConfigError(f"Source '{source_id}' classify[{i}] service must be a non-empty string")
 
         extract = rule.get("extract", {})
         if not isinstance(extract, dict):
             raise ConfigError(f"Source '{source_id}' classify[{i}] extract must be an object")
         for field_name, expr in extract.items():
+            if not isinstance(field_name, str) or not isinstance(expr, str):
+                raise ConfigError(
+                    f"Source '{source_id}' classify[{i}] extract.{field_name} must be string→string"
+                )
             try:
                 re.compile(expr)
             except re.error as exc:

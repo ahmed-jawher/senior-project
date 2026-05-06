@@ -61,7 +61,7 @@ class VectorAdapter(OutputAdapter):
         return metadata
 
     def _build_id(self, entry: LogEntry) -> str:
-        raw = "|".join(
-            [entry.source_id, entry.observed_at.isoformat(), entry.raw_message]
-        ).encode("utf-8")
+        # Deterministic across replays: same source + same raw line → same id, so
+        # restarts from a stale offset upsert in place instead of duplicating.
+        raw = f"{entry.source_id}|{entry.raw_message}".encode("utf-8")
         return hashlib.sha256(raw).hexdigest()

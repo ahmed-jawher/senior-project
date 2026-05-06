@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import date as _date
 import json
 import logging
 import os
-import re
 
 try:
     from dotenv import load_dotenv
@@ -27,7 +27,14 @@ from logconsolidator.query.retriever import LogRetriever
 from logconsolidator.query.scheduler import ReportScheduler
 
 logger = logging.getLogger(__name__)
-DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _parse_iso_date(value: str) -> _date:
+    """Parse YYYY-MM-DD strictly; raise HTTPException 400 on any malformed input."""
+    try:
+        return _date.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"date must be YYYY-MM-DD: {exc}") from exc
 
 
 if FastAPI is not None:
@@ -111,29 +118,28 @@ def create_app():
     def list_reports() -> dict[str, list[str]]:
         if not REPORTS_DIR.exists():
             return {"dates": []}
-        dates = sorted(
-            (path.stem for path in REPORTS_DIR.glob("*.md") if DATE_PATTERN.match(path.stem)),
-            reverse=True,
-        )
-        return {"dates": dates}
+        valid_dates: list[str] = []
+        for path in REPORTS_DIR.glob("*.md"):
+            try:
+                _date.fromisoformat(path.stem)
+            except ValueError:
+                continue
+            valid_dates.append(path.stem)
+        return {"dates": sorted(valid_dates, reverse=True)}
 
     @app.post("/reports/{date}/generate")
     def trigger_report(date: str, request: Request):
-        if not DATE_PATTERN.match(date):
-            raise HTTPException(status_code=400, detail="date must be formatted YYYY-MM-DD")
+        target = _parse_iso_date(date)
         engine = request.app.state.engine
         fetcher = request.app.state.fetcher
         if engine is None:
             raise HTTPException(status_code=503, detail="RAG engine unavailable.")
-        from datetime import date as date_type
-        year, month, day = (int(part) for part in date.split("-"))
-        engine.generate_report(fetcher, date_type(year, month, day))
+        engine.generate_report(fetcher, target)
         return {"status": "ok", "date": date}
 
     @app.get("/reports/{date}")
     def get_report(date: str):
-        if not DATE_PATTERN.match(date):
-            raise HTTPException(status_code=400, detail="date must be formatted YYYY-MM-DD")
+        _parse_iso_date(date)
         path = REPORTS_DIR / f"{date}.md"
         if not path.exists():
             raise HTTPException(status_code=404, detail=f"no report for {date}")

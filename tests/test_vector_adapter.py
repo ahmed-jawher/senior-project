@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
 import unittest
@@ -43,9 +44,10 @@ class VectorAdapterTests(unittest.TestCase):
         FakeClient._databases.clear()
         self.temp_dir = tempfile.TemporaryDirectory()
         self.chroma_path = Path(self.temp_dir.name) / "chroma"
+        self.observed_at = datetime(2026, 3, 14, 10, 20, 0, tzinfo=timezone.utc)
         self.entry = LogEntry(
             source_id="auth",
-            timestamp="Mar 14 10:20:00",
+            observed_at=self.observed_at,
             raw_message="Failed password for invalid user admin from 192.168.1.10 port 22 ssh2",
             fields={"user": "admin", "ip": "192.168.1.10"},
         )
@@ -81,7 +83,7 @@ class VectorAdapterTests(unittest.TestCase):
             payload["metadata"],
             {
                 "source_id": "auth",
-                "timestamp": "Mar 14 10:20:00",
+                "observed_at": self.observed_at.isoformat(),
                 "ip": "192.168.1.10",
                 "user": "admin",
             },
@@ -94,14 +96,30 @@ class VectorAdapterTests(unittest.TestCase):
 
         store = FakeClient._databases[(str(self.chroma_path), "logs")]
         document = next(iter(store.values()))["document"]
-        self.assertNotIn("timestamp", document)
-        self.assertNotIn("Mar 14 10:20:00", document)
+        self.assertNotIn("observed_at", document)
+        self.assertNotIn(self.observed_at.isoformat(), document)
 
     def test_upsert_keeps_duplicate_entry_singleton(self) -> None:
         adapter = VectorAdapter(chroma_path=self.chroma_path, client_factory=FakeClient)
 
         adapter.handle(self.entry)
         adapter.handle(self.entry)
+
+        store = FakeClient._databases[(str(self.chroma_path), "logs")]
+        self.assertEqual(len(store), 1)
+
+    def test_id_is_stable_across_observed_at_changes(self) -> None:
+        """Replays of the same line (different wall-clock observed_at) must dedupe."""
+        adapter = VectorAdapter(chroma_path=self.chroma_path, client_factory=FakeClient)
+
+        later_entry = LogEntry(
+            source_id=self.entry.source_id,
+            observed_at=datetime(2027, 1, 1, tzinfo=timezone.utc),
+            raw_message=self.entry.raw_message,
+            fields=self.entry.fields,
+        )
+        adapter.handle(self.entry)
+        adapter.handle(later_entry)
 
         store = FakeClient._databases[(str(self.chroma_path), "logs")]
         self.assertEqual(len(store), 1)

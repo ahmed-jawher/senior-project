@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Dict
 from datetime import datetime
 
 
@@ -18,4 +19,4 @@ class LogEntry:
     source_id: str
     observed_at: datetime
     raw_message: str
-    fields: Dict[str, str]
+    fields: dict[str, str]

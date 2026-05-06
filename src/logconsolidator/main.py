@@ -152,7 +152,11 @@ class LogConsolidatorApp:
         )
 
         # -:- 4) Register output sinks and start dispatcher for fan-out delivery.
-        self.adapters = [output.StorageAdapter(), output.VectorAdapter()]
+        #     Initialize each independently so a missing/broken sink (e.g. DB down,
+        #     chromadb not installed) degrades the pipeline instead of crashing it.
+        self.adapters = self._build_adapters([output.StorageAdapter, output.VectorAdapter])
+        if not self.adapters:
+            raise core.ConfigError("no output adapters initialized; refusing to start")
         self.dispatcher = DispatcherWorker(
             processed_queue=self.queues.processed_queue,
             adapters=self.adapters,
@@ -165,7 +169,22 @@ class LogConsolidatorApp:
         self.processor.start()
         self.dispatcher.start()
 
-        self.logger.info("pipeline started: watchers=%d", len(self.watchers))
+        self.logger.info(
+            "pipeline started: watchers=%d adapters=%d",
+            len(self.watchers),
+            len(self.adapters),
+        )
+
+    def _build_adapters(
+        self, adapter_classes: list[type[output.OutputAdapter]]
+    ) -> list[output.OutputAdapter]:
+        adapters: list[output.OutputAdapter] = []
+        for cls in adapter_classes:
+            try:
+                adapters.append(cls())
+            except Exception as exc:
+                self.logger.error("adapter '%s' init failed: %s", cls.__name__, exc)
+        return adapters
 
     def stop(self) -> None:
         # -:- Signal all threads first, then join and close adapters cleanly.
