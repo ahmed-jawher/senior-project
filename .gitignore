@@ -6,3 +6,7 @@ data/
 .env
 .venv/
 *.egg-info/
+
+# Editor, tooling and local databases
+.vscode/
+*.duckdb

@@ -1,10 +1,35 @@
-# logconsolidator
+# LogConsolidator
 
-A multi-source log monitoring and analysis system. File-watcher threads tail
-log files, a regex parser normalizes each line into a structured `LogEntry`,
-and a dispatcher fans entries out to PostgreSQL (canonical store) and ChromaDB
-(vector store). On top of the pipeline, a FastAPI server exposes a RAG chat
-endpoint and an LLM-generated daily report endpoint, both backed by OpenAI.
+**AI-powered log monitoring and analysis.** LogConsolidator tails log files from multiple sources, parses and classifies every line into structured events, stores them in PostgreSQL and a ChromaDB vector index, and lets you **ask questions about your logs in plain English** or read **AI-generated daily security reports**.
+
+Senior project at the University of Bahrain.
+
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
+![ChromaDB](https://img.shields.io/badge/ChromaDB-vector%20store-FF6F00)
+![OpenAI](https://img.shields.io/badge/OpenAI-RAG-412991?logo=openai&logoColor=white)
+
+![Chat with your logs](docs/screenshots/chat.png)
+
+## Features
+
+- **Multi-source ingestion**: one file-watcher thread per log source tails files in real time and remembers its read position across restarts
+- **Data-driven parsing**: each source is a JSON config with regex patterns and `classify` rules that tag entries with service, event type, severity and security relevance (no code changes needed for new log formats)
+- **Queue-based pipeline**: bounded queues connect watchers, the processor and the dispatcher, so slow sinks apply back-pressure instead of losing data
+- **Dual storage**: PostgreSQL is the canonical store; ChromaDB indexes every entry for semantic search. Each sink degrades gracefully if it is unavailable
+- **Chat with your logs (RAG)**: questions are answered by retrieving relevant log entries from ChromaDB and streaming an OpenAI answer token by token over Server-Sent Events
+- **Daily reports**: a scheduler writes a markdown report every midnight (UTC) with *Summary*, *Notable Events*, *Top Sources* and *Anomalies / Warnings*, and reports can also be generated on demand
+- **Web UI**: a two-tab interface for chat and reports, served by FastAPI
+- **Security focus**: ships with SSH auth rules that detect invalid users, failed logins, repeated authentication failures and disconnects
+
+## Screenshots
+
+| Chat with your logs | Daily report |
+|---|---|
+| ![Chat](docs/screenshots/chat.png) | ![Report](docs/screenshots/report.png) |
+
+<sub>Screenshots show the real web UI with sample log data; IP addresses are from reserved documentation ranges.</sub>
 
 ## Architecture
 
@@ -94,7 +119,7 @@ Each source is a JSON file in `config/sources/` validated against
 `config/schema/sources.schema.json`. A source declares:
 
 - `id` — stable identifier used as the Postgres `source_id`
-- `path` — absolute path to the log file to tail
+- `path` — absolute path to the log file to tail (the example uses `/var/log/secure`; change it to your system’s auth log, e.g. `/var/log/auth.log` on Debian/Ubuntu)
 - `parser.patterns` — named regexes whose first capture group becomes a field
 - `classify[]` — substring matchers that tag entries with `service`,
   `event_type`, `severity`, and optional `extract` patterns
@@ -157,3 +182,12 @@ tests/
 ```bash
 python3 -m pytest
 ```
+
+## Team
+
+| Member | GitHub |
+|---|---|
+| Ahmed Jawher | [@ahmed-jawher](https://github.com/ahmed-jawher) |
+| Adel Jasem Jedaan | [@Adel7744](https://github.com/Adel7744) |
+| yalazir | [@Yalazir](https://github.com/Yalazir) |
+| Abdulla Subah | [@asubah](https://github.com/asubah) |
