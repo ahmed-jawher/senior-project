@@ -190,4 +190,4 @@ python3 -m pytest
 | Ahmed Jawher | [@ahmed-jawher](https://github.com/ahmed-jawher) |
 | Adel Jasem Jedaan | [@Adel7744](https://github.com/Adel7744) |
 | yalazir | [@Yalazir](https://github.com/Yalazir) |
-| Abdulla Subah | [@asubah](https://github.com/asubah) |
+| (supervisor) Abdulla Subah | [@asubah](https://github.com/asubah) |
